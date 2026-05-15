@@ -65,11 +65,13 @@ jobs:
       - name: Resumo do modo de deploy
         env:
           REPO: ${{ vars.USER_SITE_REPO }}
+          SITE_PATH: ${{ vars.USER_SITE_PATH }}
         run: |
           if [ -z "${REPO}" ]; then
             echo "::notice::USER_SITE_REPO vazio — deploy só via GitHub Pages deste repositório."
           else
-            echo "::notice::USER_SITE_REPO definido (${REPO}) — push para ${REPO}/static/pinga-ana-adventure-demo/ neste mesmo job (sem artefacto entre jobs)."
+            DEST="${SITE_PATH:-pinga-ana-adventure-demo}"
+            echo "::notice::USER_SITE_REPO definido (${REPO}) — push para \`${REPO}/${DEST}/\` (variable opcional USER_SITE_PATH; omissão: pinga-ana-adventure-demo na raiz do site)."
           fi
 
       - name: Upload Pages artifact (só deploy do próprio repo)
@@ -97,12 +99,13 @@ jobs:
             exit 1
           fi
 
-      - name: Push para ${{ vars.USER_SITE_REPO }}/static/pinga-ana-adventure-demo/
+      - name: Push para ${{ vars.USER_SITE_REPO }} (subpasta configurável)
         if: ${{ vars.USER_SITE_REPO != '' }}
         env:
           TOKEN: ${{ secrets.USER_PAGES_TOKEN }}
           REPO: ${{ vars.USER_SITE_REPO }}
           BRANCH: ${{ steps.site_branch.outputs.branch }}
+          SITE_PATH: ${{ vars.USER_SITE_PATH }}
         run: |
           set -euo pipefail
           STAGE="$(mktemp -d)"
@@ -111,11 +114,10 @@ jobs:
           git clone "${AUTH}" "${CLONE}"
           cd "${CLONE}"
           git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}"
-          # Local antigo (raiz): Hugo não publica isto — só static/ vai para public/
-          rm -rf pinga-ana-adventure-demo
-          git add -u -- pinga-ana-adventure-demo 2>/dev/null || true
-          DEST="static/pinga-ana-adventure-demo"
+          DEST="${SITE_PATH:-pinga-ana-adventure-demo}"
+          # Limpa destino anterior (inclui legado Hugo em static/ se mudaste de layout)
           rm -rf "${DEST}"
+          git add -u -- "${DEST}" 2>/dev/null || true
           mkdir -p "${DEST}"
           cp -a "${GITHUB_WORKSPACE}/build/web/." "${DEST}/"
           touch "${DEST}/.nojekyll"
