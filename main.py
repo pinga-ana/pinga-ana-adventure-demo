@@ -1418,6 +1418,38 @@ def _music_toggle_rect() -> pygame.Rect:
     return pygame.Rect(WIDTH - w - margin, 40, w, h)
 
 
+def _title_start_btn_rect() -> pygame.Rect:
+    w, h = 168, 50
+    return pygame.Rect((WIDTH - w) // 2, HEIGHT // 2 + 8, w, h)
+
+
+def _game_over_buttons() -> tuple[pygame.Rect, pygame.Rect]:
+    w, h = 220, 42
+    gap = 10
+    x = (WIDTH - w) // 2
+    restart_y = HEIGHT // 2 + 18
+    return (
+        pygame.Rect(x, restart_y, w, h),
+        pygame.Rect(x, restart_y + h + gap, w, h),
+    )
+
+
+def _draw_menu_button(
+    surface: pygame.Surface,
+    rect: pygame.Rect,
+    label: str,
+    font: pygame.font.Font,
+    *,
+    hover: bool = False,
+    bg: tuple[int, int, int] = GREEN_ON,
+) -> None:
+    fill = (52, 62, 82) if hover else bg
+    pygame.draw.rect(surface, fill, rect, border_radius=8)
+    pygame.draw.rect(surface, WHITE, rect, 2, border_radius=8)
+    txt = font.render(label, True, WHITE)
+    surface.blit(txt, txt.get_rect(center=rect.center))
+
+
 def _character_select_layout(chars: list[dict]) -> list[tuple[pygame.Rect, dict]]:
     top = 48
     gap = 6
@@ -1639,8 +1671,9 @@ async def main() -> None:
     spawn_vel_prog = max(0.25, min(4.0, spawn_vel_prog))
     SPAWN_INTERVAL_SHRINK_BASE = 0.988
 
-    game_phase = "select"
+    game_phase = "start"
     selected_character: dict | None = None
+    title_start_btn = _title_start_btn_rect()
     player_max_hp = 1
 
     player: Player | None = None
@@ -1706,7 +1739,7 @@ async def main() -> None:
     def resume_bg_music_for_phase() -> None:
         if not music_enabled:
             return
-        if game_phase == "select":
+        if game_phase in ("start", "select"):
             if not _RUNS_IN_BROWSER_WASM and sel_music_path is not None:
                 _pygame_bgm_play_file(sel_music_path, music_volume=_audio_vol("musica_selecao_pygame"))
             elif _RUNS_IN_BROWSER_WASM and sel_music_path is not None:
@@ -1795,6 +1828,25 @@ async def main() -> None:
         player_hp = player_max_hp
         game_over = False
 
+    def go_to_character_select() -> None:
+        nonlocal game_phase, game_over, player, selected_character, all_sprites, enemies, bullets
+        game_phase = "select"
+        game_over = False
+        player = None
+        selected_character = None
+        all_sprites = pygame.sprite.Group()
+        enemies = pygame.sprite.Group()
+        bullets = pygame.sprite.Group()
+        _wasm_web_audio_bg_stop()
+        _pygame_bgm_stop()
+        if snd_bg is not None:
+            try:
+                snd_bg.stop()
+            except pygame.error:
+                pass
+        if music_enabled:
+            resume_bg_music_for_phase()
+
     def _pick_character_screen_pos(pos: tuple[float, float]) -> dict | None:
         for rect, ch in _character_select_layout(characters):
             if rect.collidepoint(pos):
@@ -1821,6 +1873,29 @@ async def main() -> None:
         for event in _events:
             if event.type == pygame.QUIT:
                 running = False
+                continue
+
+            if game_phase == "start":
+                if _mouse_click_is_left(event) and not (_RUNS_IN_BROWSER_WASM and _wasm_skip_synth_mouse_click):
+                    mx, my = _mouse_down_pos_px(event)
+                    if music_btn.collidepoint((mx, my)):
+                        music_enabled = not music_enabled
+                        if music_enabled:
+                            resume_bg_music_for_phase()
+                        else:
+                            pause_all_bg_music()
+                    elif title_start_btn.collidepoint((mx, my)):
+                        go_to_character_select()
+                elif event.type == pygame.FINGERDOWN:
+                    fx, fy = _finger_event_to_px(event)
+                    if music_btn.collidepoint((fx, fy)):
+                        music_enabled = not music_enabled
+                        if music_enabled:
+                            resume_bg_music_for_phase()
+                        else:
+                            pause_all_bg_music()
+                    elif title_start_btn.collidepoint((fx, fy)):
+                        go_to_character_select()
                 continue
 
             if game_phase == "select":
@@ -1853,6 +1928,7 @@ async def main() -> None:
             assert player is not None
 
             if game_over:
+                restart_btn, new_char_btn = _game_over_buttons()
                 if _mouse_click_is_left(event) and not (_RUNS_IN_BROWSER_WASM and _wasm_skip_synth_mouse_click):
                     mx, my = _mouse_down_pos_px(event)
                     if music_btn.collidepoint((mx, my)):
@@ -1861,8 +1937,10 @@ async def main() -> None:
                             resume_bg_music_for_phase()
                         else:
                             pause_all_bg_music()
-                    else:
+                    elif restart_btn.collidepoint((mx, my)):
                         reset_run()
+                    elif new_char_btn.collidepoint((mx, my)):
+                        go_to_character_select()
                 elif event.type == pygame.FINGERDOWN:
                     fx, fy = _finger_event_to_px(event)
                     if music_btn.collidepoint((fx, fy)):
@@ -1871,8 +1949,10 @@ async def main() -> None:
                             resume_bg_music_for_phase()
                         else:
                             pause_all_bg_music()
-                    else:
+                    elif restart_btn.collidepoint((fx, fy)):
                         reset_run()
+                    elif new_char_btn.collidepoint((fx, fy)):
+                        go_to_character_select()
                 continue
 
             if _mouse_click_is_left(event) and not (_RUNS_IN_BROWSER_WASM and _wasm_skip_synth_mouse_click):
@@ -1992,7 +2072,21 @@ async def main() -> None:
                             build=bn,
                         )
 
-        if game_phase == "select":
+        if game_phase == "start":
+            screen.fill(BLACK)
+            title = font_sel_title.render("Pinga Ana Adventure", True, WHITE)
+            screen.blit(title, title.get_rect(midtop=(WIDTH // 2, HEIGHT // 2 - 120)))
+            subtitle = font_sel_sub.render("Sobreviva às hordas!", True, (190, 195, 210))
+            screen.blit(subtitle, subtitle.get_rect(midtop=(WIDTH // 2, HEIGHT // 2 - 82)))
+            mx, my = pygame.mouse.get_pos()
+            _draw_menu_button(
+                screen,
+                title_start_btn,
+                "Start",
+                font_btn,
+                hover=title_start_btn.collidepoint(mx, my),
+            )
+        elif game_phase == "select":
             screen.fill(BLACK)
             title = font_sel_title.render("Escolha o personagem", True, WHITE)
             screen.blit(title, title.get_rect(midtop=(WIDTH // 2, 8)))
@@ -2050,9 +2144,24 @@ async def main() -> None:
 
             if game_over:
                 msg = font_death.render("vc morreu", True, WHITE)
-                screen.blit(msg, msg.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 36)))
-                hint = font_btn.render("Clique ou toque para recomeçar", True, (190, 190, 200))
-                screen.blit(hint, hint.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 24)))
+                screen.blit(msg, msg.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 52)))
+                restart_btn, new_char_btn = _game_over_buttons()
+                mx, my = pygame.mouse.get_pos()
+                _draw_menu_button(
+                    screen,
+                    restart_btn,
+                    "Recomeçar",
+                    font_btn,
+                    hover=restart_btn.collidepoint(mx, my),
+                )
+                _draw_menu_button(
+                    screen,
+                    new_char_btn,
+                    "Novo personagem",
+                    font_btn,
+                    hover=new_char_btn.collidepoint(mx, my),
+                    bg=(55, 75, 110),
+                )
 
         btn_m_bg = GREEN_ON if music_enabled else RED_OFF
         pygame.draw.rect(screen, btn_m_bg, music_btn, border_radius=8)
