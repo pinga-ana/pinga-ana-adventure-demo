@@ -48,8 +48,8 @@
       "musica_fundo_wasm": "sounds/Pirates-of-the-Caribbean.ogg",
       "forca": 1,
       "resistencia": 1,
-      "velocidade": 1,
-      "velocidade_tiro": 1
+      "velocidade": 1.1,
+      "velocidade_tiro": 1.1
     },
     {
       "id": "penetrus",
@@ -60,8 +60,8 @@
       "musica_fundo_wasm": "sounds/Beethoven-Moonlight-Sonata.ogg",
       "forca": 2,
       "resistencia": 1,
-      "velocidade": 0.9,
-      "velocidade_tiro": 1.6
+      "velocidade": 0.85,
+      "velocidade_tiro": 1.5
     },
     {
       "id": "uni_orc",
@@ -72,8 +72,8 @@
       "musica_fundo_wasm": "sounds/toto-africa.ogg",
       "forca": 1,
       "resistencia": 3,
-      "velocidade": 0.85,
-      "velocidade_tiro": 0.9
+      "velocidade": 0.8,
+      "velocidade_tiro": 1
     },
     {
       "id": "red_oni",
@@ -84,8 +84,8 @@
       "musica_fundo_wasm": "sounds/Tokyo-Ghoul-Unravel.ogg",
       "forca": 1,
       "resistencia": 1,
-      "velocidade": 1.7,
-      "velocidade_tiro": 1.2
+      "velocidade": 1.45,
+      "velocidade_tiro": 1.25
     },
     {
       "id": "sr_baldius",
@@ -93,10 +93,10 @@
       "name": "Sr. Baldius",
       "title": "Soldado Templário",
       "musica_fundo": "sounds/14-Back-to-the-Industry.ogg",
-      "forca": 2,
+      "forca": 1,
       "resistencia": 2,
-      "velocidade": 0.7,
-      "velocidade_tiro": 0.8
+      "velocidade": 0.75,
+      "velocidade_tiro": 0.95
     }
   ]
 }
