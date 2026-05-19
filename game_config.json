@@ -26,17 +26,89 @@
       "velocidade": 1.08,
       "comeca_apos_pontos": 0
     },
+    "slime": {
+      "sprite": "inimigos/slime.png",
+      "resistencia": 1,
+      "velocidade": 1.25,
+      "comeca_apos_pontos": 0
+    },
+    "skull": {
+      "sprite": "inimigos/skull.png",
+      "resistencia": 2,
+      "velocidade": 0.95,
+      "comeca_apos_pontos": 8
+    },
+    "vampire": {
+      "sprite": "inimigos/vampire.png",
+      "resistencia": 2,
+      "velocidade": 1.0,
+      "comeca_apos_pontos": 12
+    },
+    "spider": {
+      "sprite": "inimigos/spider.png",
+      "resistencia": 1,
+      "velocidade": 1.32,
+      "comeca_apos_pontos": 18
+    },
     "soldado": {
       "sprite": "soldier.png",
       "resistencia": 3,
       "velocidade": 0.52,
       "comeca_apos_pontos": 20
+    },
+    "hunter": {
+      "sprite": "inimigos/hunter.png",
+      "resistencia": 2,
+      "velocidade": 1.12,
+      "comeca_apos_pontos": 28
+    },
+    "kappa": {
+      "sprite": "inimigos/kappa.png",
+      "resistencia": 3,
+      "velocidade": 0.68,
+      "comeca_apos_pontos": 35
+    },
+    "cyclope": {
+      "sprite": "inimigos/cyclope.png",
+      "resistencia": 4,
+      "velocidade": 0.48,
+      "comeca_apos_pontos": 42
+    },
+    "fighter_red": {
+      "sprite": "inimigos/fighter_red.png",
+      "resistencia": 2,
+      "velocidade": 1.05,
+      "comeca_apos_pontos": 48
+    },
+    "feiticeiro": {
+      "sprite": "inimigos/feiticeiro.png",
+      "resistencia": 2,
+      "velocidade": 0.88,
+      "comeca_apos_pontos": 55
+    },
+    "bear": {
+      "sprite": "inimigos/bear.png",
+      "resistencia": 4,
+      "velocidade": 0.55,
+      "comeca_apos_pontos": 60
+    },
+    "ninja_agua": {
+      "sprite": "inimigos/ninja_agua.png",
+      "resistencia": 2,
+      "velocidade": 1.2,
+      "comeca_apos_pontos": 65
     }
   },
   "spawn": {
     "intervalo_inicial_frames": 60,
     "intervalo_minimo_frames": 12,
-    "velocidade_progressao": 1.05
+    "velocidade_progressao": 1.05,
+    "max_inimigos_simultaneos_por_pontuacao": [
+      { "ate_pontos": 10, "maximo": 5 },
+      { "ate_pontos": 20, "maximo": 6 },
+      { "ate_pontos": 50, "maximo": 10 },
+      { "ate_pontos": 70, "maximo": 15 }
+    ]
   },
   "characters": [
     {

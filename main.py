@@ -703,10 +703,23 @@ def _present_display() -> None:
 
 
 def _first_square_frame(surf: pygame.Surface) -> pygame.Surface:
-    """Tiras horizontais (ex. 600x100 com frames 100x100): usa só o 1.º frame quadrado."""
+    """Extrai 1.º frame de sheets; retratos altos (personagens) ficam inteiros."""
     w, h = surf.get_size()
     if w > h and h >= 16:
         return surf.subsurface((0, 0, h, h)).copy()
+    if h > w and w >= 16:
+        return surf
+    cell = 16
+    cols, rows = w // cell, h // cell
+    if (
+        max(w, h) <= 128
+        and w >= cell
+        and h >= cell
+        and w % cell == 0
+        and h % cell == 0
+        and (cols > 1 or rows > 1)
+    ):
+        return surf.subsurface((0, 0, cell, cell)).copy()
     return surf
 
 
@@ -939,6 +952,12 @@ def load_game_config() -> dict:
             "intervalo_inicial_frames": 60,
             "intervalo_minimo_frames": 12,
             "velocidade_progressao": 1.0,
+            "max_inimigos_simultaneos_por_pontuacao": [
+                {"ate_pontos": 10, "maximo": 5},
+                {"ate_pontos": 20, "maximo": 6},
+                {"ate_pontos": 50, "maximo": 10},
+                {"ate_pontos": 70, "maximo": 15},
+            ],
         },
         "escala_sprites": 1.15,
         "musica_selecao_personagem": None,
@@ -1122,6 +1141,37 @@ def pick_enemy_type_id(score: int, enemies_norm: dict[str, dict]) -> str:
     if not eligible:
         return next(iter(enemies_norm.keys()))
     return random.choice(eligible)
+
+
+def _normalize_max_enemies_tiers(raw: object) -> list[tuple[int, int]]:
+    """Lista `(ate_pontos, maximo)` ordenada por `ate_pontos` ascendente."""
+    if not isinstance(raw, list) or not raw:
+        return [(10, 5), (20, 6), (50, 10), (70, 15)]
+    tiers: list[tuple[int, int]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            ate = max(0, int(item.get("ate_pontos", item.get("pontos", 0))))
+            maximo = max(1, int(item.get("maximo", item.get("max", 1))))
+        except (TypeError, ValueError):
+            continue
+        tiers.append((ate, maximo))
+    if not tiers:
+        return [(10, 5), (20, 6), (50, 10), (70, 15)]
+    tiers.sort(key=lambda t: t[0])
+    return tiers
+
+
+def max_enemies_for_score(score: int, tiers: list[tuple[int, int]]) -> int:
+    """Limite de inimigos vivos ao mesmo tempo conforme faixas de pontuação."""
+    if not tiers:
+        return 99
+    s = max(0, int(score))
+    for ate, maximo in tiers:
+        if s <= ate:
+            return maximo
+    return tiers[-1][1]
 
 
 class Player(pygame.sprite.Sprite):
@@ -1669,6 +1719,9 @@ async def main() -> None:
     spawn_min = max(4, min(spawn_min, spawn_initial - 1))
     spawn_vel_prog = float(spawn_cfg.get("velocidade_progressao", 1.0))
     spawn_vel_prog = max(0.25, min(4.0, spawn_vel_prog))
+    max_enemies_tiers = _normalize_max_enemies_tiers(
+        spawn_cfg.get("max_inimigos_simultaneos_por_pontuacao")
+    )
     SPAWN_INTERVAL_SHRINK_BASE = 0.988
 
     game_phase = "start"
@@ -1998,11 +2051,13 @@ async def main() -> None:
 
             spawn_timer += 1
             if spawn_timer > spawn_interval_frames:
-                eid = pick_enemy_type_id(score, enemies_cfg)
-                profile = enemies_cfg[eid]
-                enemy = Enemy(player.pos, enemy_profile=profile, cam_offset=cam_offset)
-                enemies.add(enemy)
-                all_sprites.add(enemy)
+                cap = max_enemies_for_score(score, max_enemies_tiers)
+                if len(enemies) < cap:
+                    eid = pick_enemy_type_id(score, enemies_cfg)
+                    profile = enemies_cfg[eid]
+                    enemy = Enemy(player.pos, enemy_profile=profile, cam_offset=cam_offset)
+                    enemies.add(enemy)
+                    all_sprites.add(enemy)
                 spawn_timer = 0
                 spawn_interval_frames = max(
                     spawn_min,
