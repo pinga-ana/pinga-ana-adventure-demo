@@ -1611,6 +1611,18 @@ def _analytics_partida_extras(cfg: dict, character: dict | None) -> tuple[str | 
     return pid, bn
 
 
+def _urllib_ssl_context():
+    """Certificados confiáveis no macOS/Python.org (evita CERTIFICATE_VERIFY_FAILED)."""
+    import ssl
+
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def _post_partida_sync(
     base_url: str,
     pontuacao: int,
@@ -1640,7 +1652,7 @@ def _post_partida_sync(
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=12, context=_urllib_ssl_context()) as resp:
             resp.read(256)
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError):
         pass
@@ -1754,7 +1766,7 @@ async def _report_partida_async(
         pass
 
 
-def _fetch_top_records_sync(base_url: str, *, limit: int = 10) -> list[dict]:
+def _fetch_top_records_sync(base_url: str, *, limit: int = 10) -> list[dict] | None:
     import json
     import urllib.error
     import urllib.request
@@ -1762,16 +1774,16 @@ def _fetch_top_records_sync(base_url: str, *, limit: int = 10) -> list[dict]:
     url = f"{base_url.rstrip('/')}/records/top?limit={limit}"
     req = urllib.request.Request(url, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=12, context=_urllib_ssl_context()) as resp:
             raw = resp.read(65536)
         data = json.loads(raw.decode("utf-8"))
         records = data.get("records")
         return records if isinstance(records, list) else []
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
-        return []
+        return None
 
 
-async def _fetch_top_records_wasm(base_url: str, *, limit: int = 10) -> list[dict]:
+async def _fetch_top_records_wasm(base_url: str, *, limit: int = 10) -> list[dict] | None:
     import json
 
     url = f"{base_url.rstrip('/')}/records/top?limit={limit}"
@@ -1795,22 +1807,22 @@ async def _fetch_top_records_wasm(base_url: str, *, limit: int = 10) -> list[dic
 
         r = await js.fetch(url, to_js({"method": "GET", "cache": "no-store"}))
         if not r.ok:
-            return []
+            return None
         raw = await r.text()
         data = json.loads(raw)
         records = data.get("records") if isinstance(data, dict) else None
         return records if isinstance(records, list) else []
     except Exception:
-        return []
+        return None
 
 
-async def _fetch_top_records_async(base_url: str, *, limit: int = 10) -> list[dict]:
+async def _fetch_top_records_async(base_url: str, *, limit: int = 10) -> list[dict] | None:
     try:
         if _RUNS_IN_BROWSER_WASM:
             return await _fetch_top_records_wasm(base_url, limit=limit)
         return await asyncio.to_thread(_fetch_top_records_sync, base_url, limit=limit)
     except Exception:
-        return []
+        return None
 
 
 async def main() -> None:
@@ -1911,6 +1923,9 @@ async def main() -> None:
             return
         top_records_status = "A carregar..."
         records = await _fetch_top_records_async(base, limit=10)
+        if records is None:
+            top_records_status = "Erro ao carregar ranking"
+            return
         top_records = records
         top_records_status = "" if records else "Sem records ainda"
 
@@ -2086,7 +2101,7 @@ async def main() -> None:
         )
         game_over_partida_reported = True
         records = await _fetch_top_records_async(base, limit=10)
-        if records:
+        if records is not None:
             top_records = records
 
     async def confirm_player_name() -> None:
