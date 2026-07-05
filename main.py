@@ -1787,6 +1787,22 @@ async def _fetch_top_records_wasm(base_url: str, *, limit: int = 10) -> list[dic
     import json
 
     url = f"{base_url.rstrip('/')}/records/top?limit={limit}"
+
+    def _records_from_payload(raw: object) -> list[dict] | None:
+        try:
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8")
+            if isinstance(raw, str):
+                data = json.loads(raw)
+            elif isinstance(raw, dict):
+                data = raw
+            else:
+                return None
+            records = data.get("records") if isinstance(data, dict) else None
+            return records if isinstance(records, list) else []
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
     pyfetch = None
     try:
         from pyodide.http import pyfetch as _pyfetch  # type: ignore[import-not-found]
@@ -1796,23 +1812,25 @@ async def _fetch_top_records_wasm(base_url: str, *, limit: int = 10) -> list[dic
         pass
 
     if pyfetch is not None:
-        resp = await pyfetch(url, method="GET")
-        data = await resp.json()
-        records = data.get("records") if isinstance(data, dict) else None
-        return records if isinstance(records, list) else []
+        try:
+            resp = await asyncio.wait_for(pyfetch(url, method="GET"), timeout=15)
+            data = await resp.json()
+            parsed = _records_from_payload(data)
+            if parsed is not None:
+                return parsed
+        except (asyncio.TimeoutError, Exception):
+            pass
 
+    # pygbag: GET via aio.fetch (mesmo caminho do POST /partidas); js.fetch bloqueia o loop.
+    global _wasm_aio_fetch_handler
     try:
-        import js  # type: ignore[import-not-found]
-        from pyodide.ffi import to_js  # type: ignore[import-not-found]
+        from aio.fetch import RequestHandler  # type: ignore[import-not-found]
 
-        r = await js.fetch(url, to_js({"method": "GET", "cache": "no-store"}))
-        if not r.ok:
-            return None
-        raw = await r.text()
-        data = json.loads(raw)
-        records = data.get("records") if isinstance(data, dict) else None
-        return records if isinstance(records, list) else []
-    except Exception:
+        if _wasm_aio_fetch_handler is None:
+            _wasm_aio_fetch_handler = RequestHandler()
+        raw = await asyncio.wait_for(_wasm_aio_fetch_handler.get(url), timeout=15)
+        return _records_from_payload(raw)
+    except (asyncio.TimeoutError, Exception):
         return None
 
 
@@ -1865,6 +1883,7 @@ async def main() -> None:
     records_back_btn = _records_back_btn_rect()
     top_records: list[dict] = []
     top_records_status = ""
+    records_refresh_task: asyncio.Task | None = None
     player_max_hp = 1
 
     player: Player | None = None
@@ -1922,14 +1941,23 @@ async def main() -> None:
             top_records_status = "Ranking indisponível"
             return
         top_records_status = "A carregar..."
-        records = await _fetch_top_records_async(base, limit=10)
+        try:
+            records = await _fetch_top_records_async(base, limit=10)
+        except Exception:
+            records = None
         if records is None:
             top_records_status = "Erro ao carregar ranking"
             return
         top_records = records
         top_records_status = "" if records else "Sem records ainda"
 
-    asyncio.create_task(refresh_top_records())
+    def request_refresh_top_records() -> None:
+        nonlocal records_refresh_task
+        if records_refresh_task is not None and not records_refresh_task.done():
+            return
+        records_refresh_task = asyncio.create_task(refresh_top_records())
+
+    request_refresh_top_records()
 
     # Texturas de fundo (só desktop); no browser a grelha é gerada em draw_world_background.
     await asyncio.sleep(0)
@@ -2166,7 +2194,7 @@ async def main() -> None:
                         go_to_character_select()
                     elif title_records_btn.collidepoint((mx, my)):
                         game_phase = "records"
-                        asyncio.create_task(refresh_top_records())
+                        request_refresh_top_records()
                 elif event.type == pygame.FINGERDOWN:
                     fx, fy = _finger_event_to_px(event)
                     if music_btn.collidepoint((fx, fy)):
@@ -2179,7 +2207,7 @@ async def main() -> None:
                         go_to_character_select()
                     elif title_records_btn.collidepoint((fx, fy)):
                         game_phase = "records"
-                        asyncio.create_task(refresh_top_records())
+                        request_refresh_top_records()
                 continue
 
             if game_phase == "records":
