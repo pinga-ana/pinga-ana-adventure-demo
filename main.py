@@ -7,6 +7,7 @@ import math
 import random
 import struct
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -1473,6 +1474,18 @@ def _title_start_btn_rect() -> pygame.Rect:
     return pygame.Rect((WIDTH - w) // 2, HEIGHT // 2 + 8, w, h)
 
 
+def _title_records_btn_rect() -> pygame.Rect:
+    w, h = 168, 50
+    gap = 10
+    start = _title_start_btn_rect()
+    return pygame.Rect(start.x, start.bottom + gap, w, h)
+
+
+def _records_back_btn_rect() -> pygame.Rect:
+    w, h = 140, 42
+    return pygame.Rect((WIDTH - w) // 2, HEIGHT - 52, w, h)
+
+
 def _game_over_buttons() -> tuple[pygame.Rect, pygame.Rect]:
     w, h = 220, 42
     gap = 10
@@ -1482,6 +1495,47 @@ def _game_over_buttons() -> tuple[pygame.Rect, pygame.Rect]:
         pygame.Rect(x, restart_y, w, h),
         pygame.Rect(x, restart_y + h + gap, w, h),
     )
+
+
+def _name_entry_text_box_rect() -> pygame.Rect:
+    w, h = 260, 36
+    return pygame.Rect((WIDTH - w) // 2, HEIGHT // 2 - 6, w, h)
+
+
+def _name_entry_keyboard() -> tuple[list[tuple[pygame.Rect, str]], pygame.Rect, pygame.Rect]:
+    """Teclado compacto A–Z + backspace e confirmar (touch-friendly)."""
+    letters = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    cols = 7
+    key_w, key_h = 44, 32
+    gap = 4
+    grid_w = cols * key_w + (cols - 1) * gap
+    x0 = (WIDTH - grid_w) // 2
+    y0 = HEIGHT // 2 + 44
+    keys: list[tuple[pygame.Rect, str]] = []
+    for i, ch in enumerate(letters):
+        row, col = divmod(i, cols)
+        x = x0 + col * (key_w + gap)
+        y = y0 + row * (key_h + gap)
+        keys.append((pygame.Rect(x, y, key_w, key_h), ch))
+    last_row_y = y0 + ((len(letters) - 1) // cols + 1) * (key_h + gap) + 6
+    back_w = 100
+    ok_w = 100
+    row_gap = 8
+    back_rect = pygame.Rect((WIDTH - back_w - ok_w - row_gap) // 2, last_row_y, back_w, key_h)
+    ok_rect = pygame.Rect(back_rect.right + row_gap, last_row_y, ok_w, key_h)
+    return keys, back_rect, ok_rect
+
+
+def _score_qualifies_local(score: int, records: list[dict], *, limit: int = 10) -> bool:
+    if score <= 0:
+        return False
+    if len(records) < limit:
+        return True
+    try:
+        min_score = int(records[-1].get("pontuacao", 0))
+    except (TypeError, ValueError):
+        min_score = 0
+    return score >= min_score
 
 
 def _draw_menu_button(
@@ -1564,6 +1618,7 @@ def _post_partida_sync(
     *,
     personagem: str | None = None,
     build: int | None = None,
+    nome: str | None = None,
 ) -> None:
     import json
     import urllib.error
@@ -1575,6 +1630,8 @@ def _post_partida_sync(
         body_obj["personagem"] = personagem
     if build is not None:
         body_obj["build"] = build
+    if nome is not None:
+        body_obj["nome"] = nome
     body = json.dumps(body_obj).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -1623,6 +1680,7 @@ async def _post_partida_wasm_fetch(
     *,
     personagem: str | None = None,
     build: int | None = None,
+    nome: str | None = None,
 ) -> None:
     """POST /partidas no browser: Pyodide usa `pyfetch`; pygbag só tem stub pyodide — usar `aio.fetch`."""
     import json
@@ -1633,6 +1691,8 @@ async def _post_partida_wasm_fetch(
         body_obj["personagem"] = personagem
     if build is not None:
         body_obj["build"] = build
+    if nome is not None:
+        body_obj["nome"] = nome
 
     pyfetch = None
     try:
@@ -1668,6 +1728,7 @@ async def _report_partida_async(
     *,
     personagem: str | None = None,
     build: int | None = None,
+    nome: str | None = None,
 ) -> None:
     try:
         if _RUNS_IN_BROWSER_WASM:
@@ -1677,6 +1738,7 @@ async def _report_partida_async(
                 device,
                 personagem=personagem,
                 build=build,
+                nome=nome,
             )
         else:
             await asyncio.to_thread(
@@ -1686,9 +1748,69 @@ async def _report_partida_async(
                 device,
                 personagem=personagem,
                 build=build,
+                nome=nome,
             )
     except Exception:
         pass
+
+
+def _fetch_top_records_sync(base_url: str, *, limit: int = 10) -> list[dict]:
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = f"{base_url.rstrip('/')}/records/top?limit={limit}"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            raw = resp.read(65536)
+        data = json.loads(raw.decode("utf-8"))
+        records = data.get("records")
+        return records if isinstance(records, list) else []
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
+        return []
+
+
+async def _fetch_top_records_wasm(base_url: str, *, limit: int = 10) -> list[dict]:
+    import json
+
+    url = f"{base_url.rstrip('/')}/records/top?limit={limit}"
+    pyfetch = None
+    try:
+        from pyodide.http import pyfetch as _pyfetch  # type: ignore[import-not-found]
+
+        pyfetch = _pyfetch
+    except ImportError:
+        pass
+
+    if pyfetch is not None:
+        resp = await pyfetch(url, method="GET")
+        data = await resp.json()
+        records = data.get("records") if isinstance(data, dict) else None
+        return records if isinstance(records, list) else []
+
+    try:
+        import js  # type: ignore[import-not-found]
+        from pyodide.ffi import to_js  # type: ignore[import-not-found]
+
+        r = await js.fetch(url, to_js({"method": "GET", "cache": "no-store"}))
+        if not r.ok:
+            return []
+        raw = await r.text()
+        data = json.loads(raw)
+        records = data.get("records") if isinstance(data, dict) else None
+        return records if isinstance(records, list) else []
+    except Exception:
+        return []
+
+
+async def _fetch_top_records_async(base_url: str, *, limit: int = 10) -> list[dict]:
+    try:
+        if _RUNS_IN_BROWSER_WASM:
+            return await _fetch_top_records_wasm(base_url, limit=limit)
+        return await asyncio.to_thread(_fetch_top_records_sync, base_url, limit=limit)
+    except Exception:
+        return []
 
 
 async def main() -> None:
@@ -1727,6 +1849,10 @@ async def main() -> None:
     game_phase = "start"
     selected_character: dict | None = None
     title_start_btn = _title_start_btn_rect()
+    title_records_btn = _title_records_btn_rect()
+    records_back_btn = _records_back_btn_rect()
+    top_records: list[dict] = []
+    top_records_status = ""
     player_max_hp = 1
 
     player: Player | None = None
@@ -1741,6 +1867,13 @@ async def main() -> None:
     score = 0
     player_hp = 1
     game_over = False
+    game_over_at: float | None = None
+    game_over_ui_ready = False
+    game_over_name_phase = False
+    game_over_partida_reported = False
+    player_name_input = ""
+    NAME_MAX_LEN = 12
+    GAME_OVER_DELAY_SEC = 2.0
     shooting_enabled = True
     music_enabled = True
     font = pygame.font.SysFont(None, 32)
@@ -1770,6 +1903,19 @@ async def main() -> None:
         elif _RUNS_IN_BROWSER_WASM and sel_music_path is not None:
             _wasm_selection_music_start(sel_music_path)
 
+    async def refresh_top_records() -> None:
+        nonlocal top_records, top_records_status
+        base = _analytics_api_base(cfg)
+        if base is None:
+            top_records_status = "Ranking indisponível"
+            return
+        top_records_status = "A carregar..."
+        records = await _fetch_top_records_async(base, limit=10)
+        top_records = records
+        top_records_status = "" if records else "Sem records ainda"
+
+    asyncio.create_task(refresh_top_records())
+
     # Texturas de fundo (só desktop); no browser a grelha é gerada em draw_world_background.
     await asyncio.sleep(0)
     if not _RUNS_IN_BROWSER_WASM:
@@ -1792,7 +1938,7 @@ async def main() -> None:
     def resume_bg_music_for_phase() -> None:
         if not music_enabled:
             return
-        if game_phase in ("start", "select"):
+        if game_phase in ("start", "select", "records"):
             if not _RUNS_IN_BROWSER_WASM and sel_music_path is not None:
                 _pygame_bgm_play_file(sel_music_path, music_volume=_audio_vol("musica_selecao_pygame"))
             elif _RUNS_IN_BROWSER_WASM and sel_music_path is not None:
@@ -1822,6 +1968,8 @@ async def main() -> None:
         nonlocal game_phase, selected_character, player_max_hp, player, all_sprites
         nonlocal enemies, bullets, target_move_pos, spawn_timer, spawn_interval_frames, shoot_timer
         nonlocal score, player_hp, game_over, shooting_enabled
+        nonlocal game_over_at, game_over_ui_ready, game_over_name_phase, game_over_partida_reported
+        nonlocal player_name_input
         selected_character = character
         player_max_hp = max(1, int(character.get("resistencia", 1)))
         player = Player(character)
@@ -1835,6 +1983,11 @@ async def main() -> None:
         score = 0
         player_hp = player_max_hp
         game_over = False
+        game_over_at = None
+        game_over_ui_ready = False
+        game_over_name_phase = False
+        game_over_partida_reported = False
+        player_name_input = ""
         shooting_enabled = True
         game_phase = "playing"
         if music_enabled:
@@ -1867,6 +2020,8 @@ async def main() -> None:
     def reset_run() -> None:
         nonlocal player, all_sprites, enemies, bullets, target_move_pos
         nonlocal spawn_timer, spawn_interval_frames, shoot_timer, score, player_hp, game_over
+        nonlocal game_over_at, game_over_ui_ready, game_over_name_phase, game_over_partida_reported
+        nonlocal player_name_input
         if selected_character is None:
             return
         player = Player(selected_character)
@@ -1880,11 +2035,23 @@ async def main() -> None:
         score = 0
         player_hp = player_max_hp
         game_over = False
+        game_over_at = None
+        game_over_ui_ready = False
+        game_over_name_phase = False
+        game_over_partida_reported = False
+        player_name_input = ""
 
     def go_to_character_select() -> None:
         nonlocal game_phase, game_over, player, selected_character, all_sprites, enemies, bullets
+        nonlocal game_over_at, game_over_ui_ready, game_over_name_phase, game_over_partida_reported
+        nonlocal player_name_input
         game_phase = "select"
         game_over = False
+        game_over_at = None
+        game_over_ui_ready = False
+        game_over_name_phase = False
+        game_over_partida_reported = False
+        player_name_input = ""
         player = None
         selected_character = None
         all_sprites = pygame.sprite.Group()
@@ -1899,6 +2066,49 @@ async def main() -> None:
                 pass
         if music_enabled:
             resume_bg_music_for_phase()
+
+    async def submit_partida(*, nome: str | None = None) -> None:
+        nonlocal game_over_partida_reported, top_records
+        if game_over_partida_reported:
+            return
+        base = _analytics_api_base(cfg)
+        if base is None:
+            game_over_partida_reported = True
+            return
+        pid, bn = _analytics_partida_extras(cfg, selected_character)
+        await _report_partida_async(
+            base,
+            score,
+            _analytics_device_label(),
+            personagem=pid,
+            build=bn,
+            nome=nome,
+        )
+        game_over_partida_reported = True
+        records = await _fetch_top_records_async(base, limit=10)
+        if records:
+            top_records = records
+
+    async def confirm_player_name() -> None:
+        nonlocal game_over_name_phase, player_name_input
+        nome = player_name_input.strip() or None
+        await submit_partida(nome=nome)
+        game_over_name_phase = False
+        player_name_input = ""
+
+    def append_name_char(ch: str) -> None:
+        nonlocal player_name_input
+        if len(player_name_input) >= NAME_MAX_LEN:
+            return
+        if ch.isalpha():
+            player_name_input += ch.upper()
+        elif ch == " " and player_name_input and not player_name_input.endswith(" "):
+            player_name_input += " "
+
+    def backspace_name() -> None:
+        nonlocal player_name_input
+        if player_name_input:
+            player_name_input = player_name_input[:-1]
 
     def _pick_character_screen_pos(pos: tuple[float, float]) -> dict | None:
         for rect, ch in _character_select_layout(characters):
@@ -1939,6 +2149,9 @@ async def main() -> None:
                             pause_all_bg_music()
                     elif title_start_btn.collidepoint((mx, my)):
                         go_to_character_select()
+                    elif title_records_btn.collidepoint((mx, my)):
+                        game_phase = "records"
+                        asyncio.create_task(refresh_top_records())
                 elif event.type == pygame.FINGERDOWN:
                     fx, fy = _finger_event_to_px(event)
                     if music_btn.collidepoint((fx, fy)):
@@ -1949,6 +2162,32 @@ async def main() -> None:
                             pause_all_bg_music()
                     elif title_start_btn.collidepoint((fx, fy)):
                         go_to_character_select()
+                    elif title_records_btn.collidepoint((fx, fy)):
+                        game_phase = "records"
+                        asyncio.create_task(refresh_top_records())
+                continue
+
+            if game_phase == "records":
+                if _mouse_click_is_left(event) and not (_RUNS_IN_BROWSER_WASM and _wasm_skip_synth_mouse_click):
+                    mx, my = _mouse_down_pos_px(event)
+                    if music_btn.collidepoint((mx, my)):
+                        music_enabled = not music_enabled
+                        if music_enabled:
+                            resume_bg_music_for_phase()
+                        else:
+                            pause_all_bg_music()
+                    elif records_back_btn.collidepoint((mx, my)):
+                        game_phase = "start"
+                elif event.type == pygame.FINGERDOWN:
+                    fx, fy = _finger_event_to_px(event)
+                    if music_btn.collidepoint((fx, fy)):
+                        music_enabled = not music_enabled
+                        if music_enabled:
+                            resume_bg_music_for_phase()
+                        else:
+                            pause_all_bg_music()
+                    elif records_back_btn.collidepoint((fx, fy)):
+                        game_phase = "start"
                 continue
 
             if game_phase == "select":
@@ -1980,8 +2219,20 @@ async def main() -> None:
 
             assert player is not None
 
-            if game_over:
-                restart_btn, new_char_btn = _game_over_buttons()
+            if game_over and game_over_ui_ready:
+                name_keys, name_back_btn, name_ok_btn = _name_entry_keyboard()
+                if game_over_name_phase:
+                    if event.type == pygame.TEXTINPUT:
+                        for ch in event.text:
+                            append_name_char(ch)
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                            asyncio.create_task(confirm_player_name())
+                        elif event.key == pygame.K_BACKSPACE:
+                            backspace_name()
+                        elif event.unicode and event.unicode.isprintable():
+                            append_name_char(event.unicode)
+
                 if _mouse_click_is_left(event) and not (_RUNS_IN_BROWSER_WASM and _wasm_skip_synth_mouse_click):
                     mx, my = _mouse_down_pos_px(event)
                     if music_btn.collidepoint((mx, my)):
@@ -1990,10 +2241,22 @@ async def main() -> None:
                             resume_bg_music_for_phase()
                         else:
                             pause_all_bg_music()
-                    elif restart_btn.collidepoint((mx, my)):
-                        reset_run()
-                    elif new_char_btn.collidepoint((mx, my)):
-                        go_to_character_select()
+                    elif game_over_name_phase:
+                        for key_rect, ch in name_keys:
+                            if key_rect.collidepoint((mx, my)):
+                                append_name_char(ch)
+                                break
+                        else:
+                            if name_back_btn.collidepoint((mx, my)):
+                                backspace_name()
+                            elif name_ok_btn.collidepoint((mx, my)):
+                                asyncio.create_task(confirm_player_name())
+                    else:
+                        restart_btn, new_char_btn = _game_over_buttons()
+                        if restart_btn.collidepoint((mx, my)):
+                            reset_run()
+                        elif new_char_btn.collidepoint((mx, my)):
+                            go_to_character_select()
                 elif event.type == pygame.FINGERDOWN:
                     fx, fy = _finger_event_to_px(event)
                     if music_btn.collidepoint((fx, fy)):
@@ -2002,10 +2265,41 @@ async def main() -> None:
                             resume_bg_music_for_phase()
                         else:
                             pause_all_bg_music()
-                    elif restart_btn.collidepoint((fx, fy)):
-                        reset_run()
-                    elif new_char_btn.collidepoint((fx, fy)):
-                        go_to_character_select()
+                    elif game_over_name_phase:
+                        for key_rect, ch in name_keys:
+                            if key_rect.collidepoint((fx, fy)):
+                                append_name_char(ch)
+                                break
+                        else:
+                            if name_back_btn.collidepoint((fx, fy)):
+                                backspace_name()
+                            elif name_ok_btn.collidepoint((fx, fy)):
+                                asyncio.create_task(confirm_player_name())
+                    else:
+                        restart_btn, new_char_btn = _game_over_buttons()
+                        if restart_btn.collidepoint((fx, fy)):
+                            reset_run()
+                        elif new_char_btn.collidepoint((fx, fy)):
+                            go_to_character_select()
+                continue
+
+            if game_over and not game_over_ui_ready:
+                if _mouse_click_is_left(event) and not (_RUNS_IN_BROWSER_WASM and _wasm_skip_synth_mouse_click):
+                    mx, my = _mouse_down_pos_px(event)
+                    if music_btn.collidepoint((mx, my)):
+                        music_enabled = not music_enabled
+                        if music_enabled:
+                            resume_bg_music_for_phase()
+                        else:
+                            pause_all_bg_music()
+                elif event.type == pygame.FINGERDOWN:
+                    fx, fy = _finger_event_to_px(event)
+                    if music_btn.collidepoint((fx, fy)):
+                        music_enabled = not music_enabled
+                        if music_enabled:
+                            resume_bg_music_for_phase()
+                        else:
+                            pause_all_bg_music()
                 continue
 
             if _mouse_click_is_left(event) and not (_RUNS_IN_BROWSER_WASM and _wasm_skip_synth_mouse_click):
@@ -2116,16 +2410,19 @@ async def main() -> None:
                     b.kill()
                 if player_hp <= 0:
                     game_over = True
-                    base = _analytics_api_base(cfg)
-                    if base is not None:
-                        pid, bn = _analytics_partida_extras(cfg, selected_character)
-                        await _report_partida_async(
-                            base,
-                            score,
-                            _analytics_device_label(),
-                            personagem=pid,
-                            build=bn,
-                        )
+                    game_over_at = time.monotonic()
+                    game_over_ui_ready = False
+                    game_over_name_phase = False
+                    game_over_partida_reported = False
+                    player_name_input = ""
+
+        if game_over and game_over_at is not None and not game_over_ui_ready:
+            if time.monotonic() - game_over_at >= GAME_OVER_DELAY_SEC:
+                game_over_ui_ready = True
+                if _score_qualifies_local(score, top_records):
+                    game_over_name_phase = True
+                else:
+                    asyncio.create_task(submit_partida())
 
         if game_phase == "start":
             screen.fill(BLACK)
@@ -2140,6 +2437,41 @@ async def main() -> None:
                 "Start",
                 font_btn,
                 hover=title_start_btn.collidepoint(mx, my),
+            )
+            _draw_menu_button(
+                screen,
+                title_records_btn,
+                "Top Records",
+                font_btn,
+                hover=title_records_btn.collidepoint(mx, my),
+                bg=(55, 75, 110),
+            )
+        elif game_phase == "records":
+            screen.fill(BLACK)
+            title = font_sel_title.render("Top Records", True, WHITE)
+            screen.blit(title, title.get_rect(midtop=(WIDTH // 2, 10)))
+            mx, my = pygame.mouse.get_pos()
+            if top_records_status:
+                status_s = font_sel_stats.render(top_records_status, True, (170, 175, 190))
+                screen.blit(status_s, status_s.get_rect(midtop=(WIDTH // 2, 44)))
+            y = 72
+            for idx, rec in enumerate(top_records[:10], start=1):
+                nome_raw = rec.get("nome")
+                nome = nome_raw.strip() if isinstance(nome_raw, str) and nome_raw.strip() else "Anónimo"
+                try:
+                    pts = int(rec.get("pontuacao", 0))
+                except (TypeError, ValueError):
+                    pts = 0
+                line = font_sel_name.render(f"{idx}. {nome} — {pts}", True, WHITE)
+                screen.blit(line, (18, y))
+                y += 28
+            _draw_menu_button(
+                screen,
+                records_back_btn,
+                "Voltar",
+                font_btn,
+                hover=records_back_btn.collidepoint(mx, my),
+                bg=(55, 75, 110),
             )
         elif game_phase == "select":
             screen.fill(BLACK)
@@ -2199,24 +2531,66 @@ async def main() -> None:
 
             if game_over:
                 msg = font_death.render("vc morreu", True, WHITE)
-                screen.blit(msg, msg.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 52)))
-                restart_btn, new_char_btn = _game_over_buttons()
-                mx, my = pygame.mouse.get_pos()
-                _draw_menu_button(
-                    screen,
-                    restart_btn,
-                    "Recomeçar",
-                    font_btn,
-                    hover=restart_btn.collidepoint(mx, my),
-                )
-                _draw_menu_button(
-                    screen,
-                    new_char_btn,
-                    "Novo personagem",
-                    font_btn,
-                    hover=new_char_btn.collidepoint(mx, my),
-                    bg=(55, 75, 110),
-                )
+                screen.blit(msg, msg.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 120)))
+                score_go = font_sel_sub.render(f"Pontuação: {score}", True, (190, 195, 210))
+                screen.blit(score_go, score_go.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 82)))
+                if not game_over_ui_ready:
+                    wait_txt = font_sel_stats.render("...", True, (150, 155, 170))
+                    screen.blit(wait_txt, wait_txt.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 48)))
+                elif game_over_name_phase:
+                    rec_txt = font_sel_sub.render("Novo recorde! Seu nome:", True, (255, 220, 120))
+                    screen.blit(rec_txt, rec_txt.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 48)))
+                    name_box = _name_entry_text_box_rect()
+                    pygame.draw.rect(screen, (30, 34, 44), name_box, border_radius=6)
+                    pygame.draw.rect(screen, WHITE, name_box, 2, border_radius=6)
+                    shown = player_name_input if player_name_input else "_"
+                    name_s = font_sel_name.render(shown, True, WHITE)
+                    screen.blit(name_s, name_s.get_rect(center=name_box.center))
+                    name_keys, name_back_btn, name_ok_btn = _name_entry_keyboard()
+                    mx, my = pygame.mouse.get_pos()
+                    for key_rect, ch in name_keys:
+                        _draw_menu_button(
+                            screen,
+                            key_rect,
+                            ch,
+                            font_sel_stats,
+                            hover=key_rect.collidepoint(mx, my),
+                            bg=(45, 55, 72),
+                        )
+                    _draw_menu_button(
+                        screen,
+                        name_back_btn,
+                        "Apagar",
+                        font_sel_stats,
+                        hover=name_back_btn.collidepoint(mx, my),
+                        bg=(110, 55, 55),
+                    )
+                    _draw_menu_button(
+                        screen,
+                        name_ok_btn,
+                        "Guardar",
+                        font_sel_stats,
+                        hover=name_ok_btn.collidepoint(mx, my),
+                        bg=(55, 110, 75),
+                    )
+                else:
+                    restart_btn, new_char_btn = _game_over_buttons()
+                    mx, my = pygame.mouse.get_pos()
+                    _draw_menu_button(
+                        screen,
+                        restart_btn,
+                        "Recomeçar",
+                        font_btn,
+                        hover=restart_btn.collidepoint(mx, my),
+                    )
+                    _draw_menu_button(
+                        screen,
+                        new_char_btn,
+                        "Novo personagem",
+                        font_btn,
+                        hover=new_char_btn.collidepoint(mx, my),
+                        bg=(55, 75, 110),
+                    )
 
         btn_m_bg = GREEN_ON if music_enabled else RED_OFF
         pygame.draw.rect(screen, btn_m_bg, music_btn, border_radius=8)
