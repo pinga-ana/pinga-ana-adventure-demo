@@ -93,27 +93,45 @@ jobs:
         if: ${{ vars.USER_SITE_REPO != '' }}
         env:
           TOKEN: ${{ secrets.USER_PAGES_TOKEN }}
+          REPO: ${{ vars.USER_SITE_REPO }}
         run: |
+          set -euo pipefail
           if [ -z "${TOKEN}" ]; then
-            echo "::error::Define o secret USER_PAGES_TOKEN (PAT com push no repo indicado em USER_SITE_REPO). Settings → Secrets and variables → Actions."
+            echo "::error::Define o secret USER_PAGES_TOKEN (Settings → Secrets and variables → Actions → Secrets)."
+            echo "::error::Não uses Variables para o PAT — o workflow lê apenas secrets.USER_PAGES_TOKEN."
             exit 1
           fi
+          CODE=$(curl -sS -o /tmp/gh-repo.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}")
+          if [ "${CODE}" != "200" ]; then
+            echo "::error::USER_PAGES_TOKEN inválido ou sem acesso a ${REPO} (HTTP ${CODE})."
+            echo "::error::Cria um fine-grained PAT com Contents Read and write nesse repo; autoriza SSO na org pinga-ana se aparecer pendente."
+            cat /tmp/gh-repo.json || true
+            exit 1
+          fi
+          echo "USER_PAGES_TOKEN OK para ${REPO}"
+
+      - name: Checkout ${{ vars.USER_SITE_REPO }}
+        if: ${{ vars.USER_SITE_REPO != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.USER_SITE_REPO }}
+          token: ${{ secrets.USER_PAGES_TOKEN }}
+          ref: ${{ steps.site_branch.outputs.branch }}
+          path: site-out
+          persist-credentials: true
 
       - name: Push para ${{ vars.USER_SITE_REPO }} (subpasta configurável)
         if: ${{ vars.USER_SITE_REPO != '' }}
         env:
-          TOKEN: ${{ secrets.USER_PAGES_TOKEN }}
           REPO: ${{ vars.USER_SITE_REPO }}
           BRANCH: ${{ steps.site_branch.outputs.branch }}
           SITE_PATH: ${{ vars.USER_SITE_PATH }}
         run: |
           set -euo pipefail
-          STAGE="$(mktemp -d)"
-          CLONE="${STAGE}/site"
-          AUTH="https://x-access-token:${TOKEN}@github.com/${REPO}.git"
-          git clone "${AUTH}" "${CLONE}"
-          cd "${CLONE}"
-          git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}"
+          cd site-out
           DEST="${SITE_PATH:-pinga-ana-adventure-demo}"
           # Limpa destino anterior (inclui legado Hugo em static/ se mudaste de layout)
           rm -rf "${DEST}"
@@ -137,7 +155,7 @@ jobs:
             echo "::notice::Sem alterações para comitar."
           else
             git commit -m "deploy pinga-ana-adventure-demo from ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
-            git push "${AUTH}" "${BRANCH}"
+            git push origin "HEAD:${BRANCH}"
           fi
 
   deploy-project-pages:

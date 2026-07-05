@@ -36,7 +36,11 @@ O GitHub **não** publica o Pages **deste** repositório de projeto no URL do ap
 | **Variable** | `USER_SITE_REPO` | `pinga-ana/pinga-ana.github.io` (ou `owner/repo` do site no apex) |
 | **Variable** (opcional) | `USER_SITE_PATH` | Ex.: `static/pinga-ana-adventure-demo` (Hugo); omite para `pinga-ana-adventure-demo` na raiz |
 | **Variable** (opcional) | `USER_SITE_BRANCH` | Branch do site; por defeito `main` |
-| **Secret** | `USER_PAGES_TOKEN` | PAT com **push** no repo `.github.io` |
+| **Secret** | `USER_PAGES_TOKEN` | PAT com **push** no repo `.github.io` (**só em Secrets**, nunca em Variables) |
+
+**Importante:** o workflow lê **`secrets.USER_PAGES_TOKEN`**, não a variable homónima. Se o PAT estiver só em Variables, o clone do repo público `.github.io` pode parecer OK, mas o **push falha** com `Invalid username or token`. Copia o valor para **Secrets → USER_PAGES_TOKEN** e apaga a variable (PAT em Variables fica visível a quem gere o repo).
+
+O passo **Validar USER_PAGES_TOKEN** falha cedo se o secret estiver vazio, expirado ou sem permissão **Contents → Read and write** em `pinga-ana/pinga-ana.github.io` (fine-grained PAT: autoriza SSO na org se pedido).
 
 Com `USER_SITE_REPO` **definida**, o workflow **deixa de** usar “GitHub Pages deste repo” e faz **clone + `git add -f`** na pasta de destino. O `-f` evita que o **`.gitignore` do site** remova ficheiros do pygbag (`.apk`, `.wasm`, `.js`, etc.).
 
